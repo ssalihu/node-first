@@ -1,0 +1,216 @@
+<head>
+<!-- <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.10.2/jquery.min.js"> -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Bootstrap -->
+    <link href="dist/css/bootstrap.min.css" rel="stylesheet">
+<script src="jquery-2.0.3.min.js"></script>
+<script type="text/javascript" src="mespeak/mespeak.js"></script>
+</head>
+<body>
+<div class="panel-group" id="accordion">
+  <div class="panel panel-default">
+    <div class="panel-heading">
+      <h1 class="panel-title">
+        <a data-toggle="collapse" data-parent="#accordion" href="#collapseOne">
+            <center><h1>MeTrics Control Panel v 1.0</h1></center>
+        </a>
+      </h1>
+    </div>
+<div class="container">
+    <div id="collapseOne" class="panel-collapse collapse">
+      <div class="panel-body">
+<div id=controls>
+<input type="checkbox" id="inactive" value="1"  > Alert Inactive &nbsp; &nbsp; <input type="checkbox" id="speakup" value="1"  >MeSpeak
+&nbsp;&nbsp;&nbsp;<input type="button" id="clearconsole" value="Clear MeTrics" class="btn btn-primary"/> <div id="banner"></div>
+<br>
+Add <input type="text" id='ignoretext' size=10/> terminal to ignore list 
+<button type="button" data-loading-text="Add now..." class="btn btn-primary" id="add2ignore">
+  Add now
+</button>
+</div>
+<div id="options">
+<input type="radio" id="exceptions" name="rate" value="errors" checked="checked"> Show Errors Only
+<input type="radio" id="all" name="rate" value="metrics"> Show All
+</div>
+
+      </div>
+    </div>
+  </div>
+</div>
+</div> <!-- container -->
+<audio id="disconnected" src="audio/disconnect.ogg" type="audio/ogg" preload="auto"></audio>
+<audio id="error" src="audio/exception.ogg" type="audio/ogg" preload="auto"></audio>
+<script src="http://development.server.net:3003/socket.io/socket.io.js"></script>
+<script>
+  meSpeak.loadConfig("mespeak/mespeak_config.json");
+  meSpeak.loadVoice("mespeak/voices/en/en.json");
+  var socket = io.connect('http://nodeserver:3005');
+  var ignorelist ={};
+  var terminallist ={};
+  //var expiry = 600000; //10 minutes
+  var expiry = 7200000; //10 minutes
+  socket.on('feed', function (data) {
+    console.log(data);
+    var opted = $('input:radio[name=rate]:checked').val();
+    var showInactive = $('#inactive').is(':checked');
+    var speak = $('#speakup').is(':checked');
+
+    terminallist[data.terminal_id] = new Date().getTime();
+    if ((data.terminal_id).startsWith('53278')) return;
+    if (data.status !='failure'){
+       $('#show').prepend('<center><font color=blue size=21> ...Now processing info for ' + data.terminal_id + '/' + data.customer+ '... </font></center><br>');
+    } else {
+       $('#show').prepend('<center><font color=red size=21> ...Now processing info for ' + data.terminal_id + '/' + data.customer+ '... </font></center><br>');
+    }
+
+    /*
+     * check if the terminal is already marked for ignore
+     * if found then check if the ignore time has expired
+     */
+    if ( ignorelist[data.terminal_id] != null ) {
+       if ( ( new Date().getTime() - ignorelist[data.terminal_id] ) < expiry ) {
+          console.log(data.terminal_id + ' is in ignore list. Waiting for expiry ...');
+          return;
+       } else {
+          console.log(data.terminal_id + ' ignore time has expired.');
+          delete ignorelist[data.terminal_id];
+       }
+    }
+
+    if (data.status === 'failure' && showInactive===true){
+       $('#banner').html('');
+       $('#banner').html('<font size=33 color=purple>' + data.terminal_id + '</font>');
+       $('#banner').slideDown(function() {
+             setTimeout(function() {
+                $('#banner').slideUp();
+             }, 15000);
+       });
+       document.getElementById('disconnected').play();
+       $('#show').prepend("<center><font size=21 color='red'>"+data.terminal_id+"<b> Reason : "+ data.payload+"</b><font></center><br>");
+       if (speak) {
+          meSpeak.speak('Wayne ! ' +data.terminal_id +' is not connecting',{ variant :"f5" });
+       }
+    } else{
+       if (opted === 'metrics') {
+          $('#show').prepend(data.payload.replace("\n","\r\n"));
+          $('#show').prepend("<center><font color='green'>"+data.terminal_id+"<font><font color=green>&nbsp; =>&nbsp; [OK]</font></center><br>");
+                  $('#show').prepend('<hr>');
+       } 
+       if (opted === 'errors') {
+          var error_patterns = ["NullPointerException","Exception"];
+          data_to_mine = data.payload.replace("\n","\r\n");
+          for (index=0;index<error_patterns.length;index++){
+               matched = 0; 
+               renderingErrpr = false;
+               if ( data_to_mine.indexOf(error_patterns[index]) > 0 ) {
+                  /*
+                   * if rendering is there then skip. This is not critical
+                   * but still there is an issue if there is other Exception.
+                   * Kiosk Code needs to be changed to rename the keyword 'Exception'
+                   */
+                  if (data_to_mine.indexOf("Exception while rendering label ui") > 0) {
+                     continue;
+                  }
+                  if (data_to_mine.indexOf("UnknownHostException: prod.server.net") > 0) {
+                     continue;
+                  }
+                  if (data_to_mine.indexOf("UnknownHostException: qa.server.net") > 0) {
+                     continue;
+                  }
+                  if (data_to_mine.indexOf("UnknownHostException: cert.server.net") > 0) {
+                     continue;
+                  }
+                  if (data_to_mine.indexOf("IllegalComponentStateException occured") > 0) {
+                     continue;
+                  }
+                  if (data_to_mine.indexOf("GlobalExceptionHandler") > 0) {
+                     continue;
+                  }
+                  if (data_to_mine.indexOf("CardTypes$Card$Builder") > 0) {
+                     continue;
+                  }
+                  console.log(data_to_mine.indexOf(error_patterns[index]));
+                  $('#banner').prepend('&nbsp;&nbsp;<font size=33 color=red>' + data.terminal_id + '</font>');
+                  $('#banner').slideDown(function() {
+                         setTimeout(function() {
+                              $('#banner').slideUp(); 
+                              }, 15000);
+                  });
+                  document.getElementById('error').play();
+                  setTimeout(function(){},5000);
+                  if (speak) {
+                     meSpeak.speak('Wayne ! ' +data.terminal_id +' has a possible error.',{ variant :"f5" });
+                  }
+                  //$('#show').prepend('</font>');
+                  build_it = "<font size=21 color='red'>"+data.terminal_id+" Possible Error Detected </font><br>" + data_to_mine.substring(0,data_to_mine.indexOf(error_patterns[index]))+
+                             '<font color=red>'+ data_to_mine.substring(data_to_mine.indexOf(error_patterns[index],data_to_mine.length-error_patterns[index]-1)) 
+                             +'</font>'; 
+                  $('#show').prepend(build_it);
+                  $('#show').prepend('<hr>');
+                  break;
+               }
+          }
+       }
+    }
+    // If we want we can send it. Future use
+    //socket.emit('acknowledge', { response: 'got it' });
+  });
+  $(document).ready( 
+    function() {
+      $('#add2ignore').click(function() {
+           whichterminal = $('#ignoretext').val().toUpperCase();
+           console.log(whichterminal);
+           if (terminallist[whichterminal]==null) {
+              console.log('Dude, its not even here yet');
+              var speak = $('#speakup').is(':checked');
+              if (speak) {
+                 meSpeak.speak('WHAT are you doing? The terminal identification is not even in the approved list!',{ variant :"f5" });
+              }
+              return;
+           }
+           if (ignorelist[whichterminal]!=null) {
+             console.log('found' + ignorelist[whichterminal]);
+             if (speak) {
+                meSpeak.speak('Master, did you know that ' + whichterminal + ' is already in the list?',{ variant :"f5" });
+             }
+           } else{
+             console.log('not found');
+             meSpeak.speak('Master,   I WILL add ' + whichterminal + ' to the ignore list.',{ variant :"f5" });
+             ignorelist[whichterminal] = new Date().getTime();
+             $('#ignoretext').html('');
+           }
+      });
+      $('#clearconsole').click(function() {
+      
+         var speak = $('#speakup').is(':checked');
+         if (speak) {
+            meSpeak.speak('Clearing the console now, Master.',{ variant :"f5" });
+         }
+         $('#show').html('');
+         $('#banner').html('');
+      });
+      if (typeof String.prototype.startsWith != 'function') {
+       // see below for better implementation!
+         String.prototype.startsWith = function (str){
+         return this.indexOf(str) == 0;
+      };
+}
+    }
+   );
+</script>
+<hr>
+<div id=show class="server">
+</div>
+<style type="text/css">
+div.server
+{
+font-size:12pt;
+font-family:"Courier New", Courier, monospace;
+font-weight:bold;
+color:#23238e;
+}
+</style>
+    <!-- jQuery (necessary for Bootstrap's JavaScript plugins) -->
+    <!-- Include all compiled plugins (below), or include individual files as needed -->
+    <script src="dist/js/bootstrap.min.js"></script>
+</body>
